@@ -802,6 +802,9 @@ public class AnthropicOpenAiMapper {
         if (!StringUtils.hasText(text)) {
             return text;
         }
+        if (!proxyProperties.isFilterReasoningText()) {
+            return text;
+        }
 
         StringBuilder visible = new StringBuilder();
         int start = 0;

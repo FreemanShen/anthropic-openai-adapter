@@ -32,6 +32,7 @@ set UPSTREAM_BASE_URL=https://api.minimaxi.com/v1
 set UPSTREAM_CHAT_COMPLETIONS_PATH=/chat/completions
 set UPSTREAM_API_KEY=your_api_key
 set DEFAULT_MODEL=MiniMax-M2.1
+set FILTER_REASONING_TEXT=true
 set LOG_PATH=logs
 java -jar target\anthropic-adapter-1.0.0.jar
 ```
@@ -44,6 +45,7 @@ export UPSTREAM_BASE_URL=https://api.minimaxi.com/v1
 export UPSTREAM_CHAT_COMPLETIONS_PATH=/chat/completions
 export UPSTREAM_API_KEY=your_api_key
 export DEFAULT_MODEL=MiniMax-M2.1
+export FILTER_REASONING_TEXT=true
 export LOG_PATH=logs
 java -jar target/anthropic-adapter-1.0.0.jar
 ```
@@ -64,6 +66,7 @@ java -Xms256m -Xmx512m -jar target/anthropic-adapter-1.0.0.jar
 | `UPSTREAM_CHAT_COMPLETIONS_PATH` | `/chat/completions` | 上游接口路径 |
 | `UPSTREAM_API_KEY` | 空 | 上游 API Key |
 | `DEFAULT_MODEL` | `MiniMax-M2.1` | 默认模型名 |
+| `FILTER_REASONING_TEXT` | `true` | 是否过滤上游普通文本中的 `<think>...</think>` |
 | `LOG_PATH` | `logs` | 日志目录 |
 
 ## 5. 对外接口

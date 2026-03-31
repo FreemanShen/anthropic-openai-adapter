@@ -1,5 +1,6 @@
 package com.example.adapter.service;
 
+import com.example.adapter.config.ProxyProperties;
 import com.example.adapter.util.SseWriter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -70,9 +71,11 @@ public class AnthropicStreamTranslator {
     private static final Logger log = LoggerFactory.getLogger(AnthropicStreamTranslator.class);
 
     private final ObjectMapper objectMapper;
+    private final ProxyProperties proxyProperties;
 
-    public AnthropicStreamTranslator(ObjectMapper objectMapper) {
+    public AnthropicStreamTranslator(ObjectMapper objectMapper, ProxyProperties proxyProperties) {
         this.objectMapper = objectMapper;
+        this.proxyProperties = proxyProperties;
     }
 
     /**
@@ -545,6 +548,9 @@ public class AnthropicStreamTranslator {
     private String stripReasoningText(String text, StreamState state) {
         if (text == null || text.length() == 0) {
             return "";
+        }
+        if (!proxyProperties.isFilterReasoningText()) {
+            return text;
         }
 
         StringBuilder visible = new StringBuilder();

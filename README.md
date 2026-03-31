@@ -43,6 +43,7 @@ UPSTREAM_BASE_URL=https://api.minimaxi.com/v1
 UPSTREAM_CHAT_COMPLETIONS_PATH=/chat/completions
 UPSTREAM_API_KEY=your_api_key
 DEFAULT_MODEL=MiniMax-M2.1
+FILTER_REASONING_TEXT=true
 LOG_PATH=logs
 ```
 

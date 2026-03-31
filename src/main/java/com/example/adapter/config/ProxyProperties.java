@@ -45,6 +45,8 @@ public class ProxyProperties {
     /** 未指定模型时的默认模型名 */
     private String defaultModel = "MiniMax-M2.1";
 
+    private boolean filterReasoningText = true;
+
     public String getBaseUrl() {
         return baseUrl;
     }
@@ -75,5 +77,13 @@ public class ProxyProperties {
 
     public void setDefaultModel(String defaultModel) {
         this.defaultModel = defaultModel;
+    }
+
+    public boolean isFilterReasoningText() {
+        return filterReasoningText;
+    }
+
+    public void setFilterReasoningText(boolean filterReasoningText) {
+        this.filterReasoningText = filterReasoningText;
     }
 }

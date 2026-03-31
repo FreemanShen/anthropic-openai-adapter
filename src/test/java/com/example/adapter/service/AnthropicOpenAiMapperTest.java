@@ -14,9 +14,7 @@ class AnthropicOpenAiMapperTest {
 
     @BeforeEach
     void setUp() {
-        ProxyProperties properties = new ProxyProperties();
-        properties.setDefaultModel("MiniMax-M2.1");
-        mapper = new AnthropicOpenAiMapper(objectMapper, properties);
+        mapper = createMapper(true);
     }
 
     @Test
@@ -160,6 +158,32 @@ class AnthropicOpenAiMapperTest {
     }
 
     @Test
+    void shouldPreserveReasoningTextWhenFilterDisabled() throws Exception {
+        AnthropicOpenAiMapper passthroughMapper = createMapper(false);
+        String openAiResponse = "{\n" +
+                "  \"id\": \"chatcmpl-789\",\n" +
+                "  \"model\": \"MiniMax-M2.1\",\n" +
+                "  \"choices\": [\n" +
+                "    {\n" +
+                "      \"finish_reason\": \"stop\",\n" +
+                "      \"message\": {\n" +
+                "        \"role\": \"assistant\",\n" +
+                "        \"content\": \"<think>internal</think>Visible answer\"\n" +
+                "      }\n" +
+                "    }\n" +
+                "  ],\n" +
+                "  \"usage\": {\n" +
+                "    \"prompt_tokens\": 8,\n" +
+                "    \"completion_tokens\": 3\n" +
+                "  }\n" +
+                "}";
+
+        JsonNode result = passthroughMapper.toAnthropicResponse(openAiResponse);
+        Assertions.assertEquals("<think>internal</think>Visible answer",
+                result.path("content").get(0).path("text").asText());
+    }
+
+    @Test
     void shouldPreserveStructuredToolResultPayloads() throws Exception {
         String anthropicRequest = "{\n" +
                 "  \"messages\": [\n" +
@@ -178,5 +202,12 @@ class AnthropicOpenAiMapperTest {
         Assertions.assertEquals("tool", result.path("messages").get(0).path("role").asText());
         Assertions.assertTrue(toolContent.contains("\"is_error\":true"));
         Assertions.assertTrue(toolContent.contains("\"type\":\"image\""));
+    }
+
+    private AnthropicOpenAiMapper createMapper(boolean filterReasoningText) {
+        ProxyProperties properties = new ProxyProperties();
+        properties.setDefaultModel("MiniMax-M2.1");
+        properties.setFilterReasoningText(filterReasoningText);
+        return new AnthropicOpenAiMapper(objectMapper, properties);
     }
 }

@@ -12,6 +12,7 @@ adapter:
     chat-completions-path: ${UPSTREAM_CHAT_COMPLETIONS_PATH:/chat/completions}
     api-key: ${UPSTREAM_API_KEY:}
     default-model: ${DEFAULT_MODEL:MiniMax-M2.1}
+    filter-reasoning-text: ${FILTER_REASONING_TEXT:true}
 
 logging:
   file:

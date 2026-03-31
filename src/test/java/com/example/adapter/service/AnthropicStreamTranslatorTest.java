@@ -1,5 +1,6 @@
 package com.example.adapter.service;
 
+import com.example.adapter.config.ProxyProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -19,7 +20,7 @@ class AnthropicStreamTranslatorTest {
                 + "data: {\"id\":\"chatcmpl-1\",\"model\":\"MiniMax-M2.1\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"Shanghai\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":12}}\n\n"
                 + "data: [DONE]\n\n";
 
-        AnthropicStreamTranslator translator = new AnthropicStreamTranslator(new ObjectMapper());
+        AnthropicStreamTranslator translator = createTranslator(true);
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         translator.translate(new BufferedReader(new StringReader(sse)), outputStream);
         String output = new String(outputStream.toByteArray(), StandardCharsets.UTF_8);
@@ -44,7 +45,7 @@ class AnthropicStreamTranslatorTest {
                 + "data: {\"id\":\"chatcmpl-2\",\"model\":\"MiniMax-M2.1\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"city\\\":\\\"Shanghai\\\"}\"}}]},\"finish_reason\":\"content_filter\"}],\"usage\":null}\n\n"
                 + "data: {\"id\":\"chatcmpl-2\",\"model\":\"MiniMax-M2.1\",\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":9,\"prompt_tokens_details\":{\"cached_tokens\":4}}}\n\n";
 
-        AnthropicStreamTranslator translator = new AnthropicStreamTranslator(new ObjectMapper());
+        AnthropicStreamTranslator translator = createTranslator(true);
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         translator.translate(new BufferedReader(new StringReader(sse)), outputStream);
         String output = new String(outputStream.toByteArray(), StandardCharsets.UTF_8);
@@ -62,5 +63,30 @@ class AnthropicStreamTranslatorTest {
         Assertions.assertTrue(textStart >= 0);
         Assertions.assertTrue(textStop > textStart);
         Assertions.assertTrue(toolStart > textStop);
+    }
+
+    @Test
+    void shouldPreserveThinkBlocksWhenFilterDisabled() throws Exception {
+        String sse = ""
+                + "data: {\"id\":\"chatcmpl-3\",\"model\":\"MiniMax-M2.1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"<think>\"}}]}\n\n"
+                + "data: {\"id\":\"chatcmpl-3\",\"model\":\"MiniMax-M2.1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hidden\"}}]}\n\n"
+                + "data: {\"id\":\"chatcmpl-3\",\"model\":\"MiniMax-M2.1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"</think>Visible text\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":6,\"completion_tokens\":4}}\n\n"
+                + "data: [DONE]\n\n";
+
+        AnthropicStreamTranslator translator = createTranslator(false);
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        translator.translate(new BufferedReader(new StringReader(sse)), outputStream);
+        String output = new String(outputStream.toByteArray(), StandardCharsets.UTF_8);
+
+        Assertions.assertTrue(output.contains("\"text\":\"<think>\""));
+        Assertions.assertTrue(output.contains("\"text\":\"hidden\""));
+        Assertions.assertTrue(output.contains("\"text\":\"</think>Visible text\""));
+        Assertions.assertTrue(output.contains("\"stop_reason\":\"end_turn\""));
+    }
+
+    private AnthropicStreamTranslator createTranslator(boolean filterReasoningText) {
+        ProxyProperties properties = new ProxyProperties();
+        properties.setFilterReasoningText(filterReasoningText);
+        return new AnthropicStreamTranslator(new ObjectMapper(), properties);
     }
 }

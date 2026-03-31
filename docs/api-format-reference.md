@@ -435,7 +435,7 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta"
   - `auto`
   - `required`
   - `{ "type": "function", "function": { "name": "..." } }`
-- 某些 OpenAI Compatible 提供商会把推理过程放进普通文本中，例如 `<think>...</think>`。本适配器会在返回 Anthropic 报文前做过滤。
+- 某些 OpenAI Compatible 提供商会把推理过程放进普通文本中，例如 `<think>...</think>`。本适配器默认会在返回 Anthropic 报文前做过滤，也可通过 `adapter.upstream.filter-reasoning-text=false` 或 `FILTER_REASONING_TEXT=false` 关闭。
 - Anthropic 的复杂 `tool_result` 内容无法在 OpenAI `role=tool` 中完全 1:1 表达。本适配器会尽量保留为结构化 JSON 字符串，避免信息静默丢失。
 
 ## 7. 开发和排障建议
