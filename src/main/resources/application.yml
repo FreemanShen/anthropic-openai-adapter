@@ -1,0 +1,21 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: anthropic-adapter
+
+adapter:
+  upstream:
+    base-url: ${UPSTREAM_BASE_URL:https://api.minimaxi.com/v1}
+    chat-completions-path: ${UPSTREAM_CHAT_COMPLETIONS_PATH:/chat/completions}
+    api-key: ${UPSTREAM_API_KEY:}
+    default-model: ${DEFAULT_MODEL:MiniMax-M2.1}
+
+logging:
+  file:
+    path: ${LOG_PATH:logs}
+  level:
+    root: INFO
+    com.example.adapter: INFO
+    okhttp3: WARN

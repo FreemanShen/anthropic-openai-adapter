@@ -1,0 +1,1 @@
+{"model":"MiniMax-M2.1","max_tokens":128,"stream":true,"tools":[{"name":"weather","description":"Get weather by city","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}],"tool_choice":{"type":"any"},"messages":[{"role":"user","content":[{"type":"text","text":"Call the weather tool for Shanghai. Do not answer directly."}]}]}

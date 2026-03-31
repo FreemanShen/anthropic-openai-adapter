@@ -1,0 +1,8 @@
+.idea/
+target/
+logs/
+*.log
+*.pid
+*.class
+out/
+.DS_Store
