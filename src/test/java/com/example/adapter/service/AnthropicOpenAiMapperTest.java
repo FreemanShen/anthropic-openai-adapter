@@ -158,6 +158,54 @@ class AnthropicOpenAiMapperTest {
     }
 
     @Test
+    void shouldStripImplicitReasoningPrefixForGlmResponses() throws Exception {
+        String openAiResponse = "{\n" +
+                "  \"id\": \"chatcmpl-457\",\n" +
+                "  \"model\": \"glm-4.7-flash\",\n" +
+                "  \"choices\": [\n" +
+                "    {\n" +
+                "      \"finish_reason\": \"stop\",\n" +
+                "      \"message\": {\n" +
+                "        \"role\": \"assistant\",\n" +
+                "        \"content\": \"hidden reasoning</think>Visible answer\"\n" +
+                "      }\n" +
+                "    }\n" +
+                "  ],\n" +
+                "  \"usage\": {\n" +
+                "    \"prompt_tokens\": 8,\n" +
+                "    \"completion_tokens\": 3\n" +
+                "  }\n" +
+                "}";
+
+        JsonNode result = mapper.toAnthropicResponse(openAiResponse);
+        Assertions.assertEquals("Visible answer", result.path("content").get(0).path("text").asText());
+    }
+
+    @Test
+    void shouldKeepPlainTextForNonThinkingModelsWithoutThinkTags() throws Exception {
+        String openAiResponse = "{\n" +
+                "  \"id\": \"chatcmpl-458\",\n" +
+                "  \"model\": \"gpt-4o-mini\",\n" +
+                "  \"choices\": [\n" +
+                "    {\n" +
+                "      \"finish_reason\": \"stop\",\n" +
+                "      \"message\": {\n" +
+                "        \"role\": \"assistant\",\n" +
+                "        \"content\": \"Visible answer only\"\n" +
+                "      }\n" +
+                "    }\n" +
+                "  ],\n" +
+                "  \"usage\": {\n" +
+                "    \"prompt_tokens\": 8,\n" +
+                "    \"completion_tokens\": 3\n" +
+                "  }\n" +
+                "}";
+
+        JsonNode result = mapper.toAnthropicResponse(openAiResponse);
+        Assertions.assertEquals("Visible answer only", result.path("content").get(0).path("text").asText());
+    }
+
+    @Test
     void shouldPreserveReasoningTextWhenFilterDisabled() throws Exception {
         AnthropicOpenAiMapper passthroughMapper = createMapper(false);
         String openAiResponse = "{\n" +

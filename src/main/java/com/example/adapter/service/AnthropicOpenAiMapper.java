@@ -52,6 +52,9 @@ import java.util.Iterator;
 @Component
 public class AnthropicOpenAiMapper {
 
+    private static final String THINK_OPEN_TAG = "<think>";
+    private static final String THINK_CLOSE_TAG = "</think>";
+
     private static final Logger log = LoggerFactory.getLogger(AnthropicOpenAiMapper.class);
 
     private final ObjectMapper objectMapper;
@@ -165,10 +168,13 @@ public class AnthropicOpenAiMapper {
 
         JsonNode choice = firstChoice(openAiResponse);
         JsonNode message = choice.path("message");
+        String model = openAiResponse.path("model").asText("");
+        boolean allowImplicitThinkingClose = supportsImplicitThinkingClose(openAiResponse.path("model").asText(""));
+        warnIfMiniMaxToolThinkingMayBeLost(model, choice, message);
 
         // 构建 content 数组：文本块 + 工具调用块
         ArrayNode content = objectMapper.createArrayNode();
-        appendAssistantContentBlocks(message.path("content"), content);
+        appendAssistantContentBlocks(message.path("content"), content, allowImplicitThinkingClose);
         appendToolUseBlocks(message.path("tool_calls"), content);
 
         anthropicResponse.set("content", content);
@@ -558,26 +564,27 @@ public class AnthropicOpenAiMapper {
      * - 数组 → 遍历 parts，text part 转为 Anthropic text block
      * - 同时过滤掉 <think>...</think> 标签
      */
-    private void appendAssistantContentBlocks(JsonNode contentNode, ArrayNode content) {
+    private void appendAssistantContentBlocks(JsonNode contentNode, ArrayNode content,
+                                             boolean allowImplicitThinkingClose) {
         if (contentNode == null || contentNode.isNull()) {
             return;
         }
         if (contentNode.isTextual()) {
-            addTextBlock(content, stripReasoningText(contentNode.asText()));
+            addTextBlock(content, stripReasoningText(contentNode.asText(), allowImplicitThinkingClose));
             return;
         }
         if (!contentNode.isArray()) {
-            addTextBlock(content, stripReasoningText(contentNode.toString()));
+            addTextBlock(content, stripReasoningText(contentNode.toString(), allowImplicitThinkingClose));
             return;
         }
 
         for (JsonNode part : contentNode) {
             String type = part.path("type").asText();
             if ("text".equals(type)) {
-                addTextBlock(content, stripReasoningText(part.path("text").asText("")));
+                addTextBlock(content, stripReasoningText(part.path("text").asText(""), allowImplicitThinkingClose));
             } else {
                 // 其他类型（如 image）转为字符串放入 text block
-                addTextBlock(content, stripReasoningText(part.toString()));
+                addTextBlock(content, stripReasoningText(part.toString(), allowImplicitThinkingClose));
             }
         }
     }
@@ -798,7 +805,7 @@ public class AnthropicOpenAiMapper {
      * 这是因为 Anthropic 模型生成的思考过程在 OpenAI 格式中是普通文本，
      * 转换回 Anthropic 响应时需要将其剔除。
      */
-    private String stripReasoningText(String text) {
+    private String stripReasoningText(String text, boolean allowImplicitThinkingClose) {
         if (!StringUtils.hasText(text)) {
             return text;
         }
@@ -807,20 +814,66 @@ public class AnthropicOpenAiMapper {
         }
 
         StringBuilder visible = new StringBuilder();
-        int start = 0;
-        while (true) {
-            int thinkStart = text.indexOf("<think>", start);
+        int index = 0;
+        boolean insideThinkBlock = false;
+        boolean implicitLeadingThinkHandled = false;
+
+        while (index < text.length()) {
+            if (insideThinkBlock) {
+                int thinkEnd = text.indexOf(THINK_CLOSE_TAG, index);
+                if (thinkEnd < 0) {
+                    break;
+                }
+                insideThinkBlock = false;
+                index = thinkEnd + THINK_CLOSE_TAG.length();
+                continue;
+            }
+
+            int thinkStart = text.indexOf(THINK_OPEN_TAG, index);
+            int thinkEnd = text.indexOf(THINK_CLOSE_TAG, index);
+            if (allowImplicitThinkingClose && !implicitLeadingThinkHandled
+                    && thinkEnd >= 0 && (thinkStart < 0 || thinkEnd < thinkStart)) {
+                implicitLeadingThinkHandled = true;
+                index = thinkEnd + THINK_CLOSE_TAG.length();
+                continue;
+            }
             if (thinkStart < 0) {
-                visible.append(text.substring(start));
+                visible.append(text.substring(index));
                 break;
             }
-            visible.append(text, start, thinkStart);
-            int thinkEnd = text.indexOf("</think>", thinkStart + "<think>".length());
-            if (thinkEnd < 0) {
-                break;
-            }
-            start = thinkEnd + "</think>".length();
+            visible.append(text, index, thinkStart);
+            insideThinkBlock = true;
+            index = thinkStart + THINK_OPEN_TAG.length();
         }
         return visible.toString();
+    }
+
+    private boolean supportsImplicitThinkingClose(String model) {
+        String normalizedModel = model == null ? "" : model.toLowerCase();
+        return normalizedModel.contains("glm-4.5")
+                || normalizedModel.contains("glm-4.6")
+                || normalizedModel.contains("glm-4.7");
+    }
+
+    private void warnIfMiniMaxToolThinkingMayBeLost(String model, JsonNode choice, JsonNode message) {
+        if (!proxyProperties.isFilterReasoningText() || !isMiniMaxM2Model(model)) {
+            return;
+        }
+
+        String finishReason = choice.path("finish_reason").asText("");
+        boolean hasToolCalls = message.path("tool_calls").isArray() && message.path("tool_calls").size() > 0;
+        if (!hasToolCalls && !"tool_calls".equals(finishReason) && !"function_call".equals(finishReason)) {
+            return;
+        }
+
+        log.warn("检测到 MiniMax M2 工具调用响应，当前仍在过滤 reasoning 文本。"
+                        + "这会丢失 interleaved thinking 上下文，可能导致后续 agent/tool 回合异常。"
+                        + "如需验证，请将 FILTER_REASONING_TEXT=false。model={}",
+                model);
+    }
+
+    private boolean isMiniMaxM2Model(String model) {
+        String normalizedModel = model == null ? "" : model.toLowerCase();
+        return normalizedModel.contains("minimax-m2");
     }
 }

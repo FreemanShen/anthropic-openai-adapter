@@ -68,6 +68,9 @@ import java.util.UUID;
 @Component
 public class AnthropicStreamTranslator {
 
+    private static final String THINK_OPEN_TAG = "<think>";
+    private static final String THINK_CLOSE_TAG = "</think>";
+
     private static final Logger log = LoggerFactory.getLogger(AnthropicStreamTranslator.class);
 
     private final ObjectMapper objectMapper;
@@ -160,6 +163,7 @@ public class AnthropicStreamTranslator {
         }
         if (StringUtils.hasText(chunk.path("model").asText())) {
             state.model = chunk.path("model").asText();
+            state.allowImplicitThinkingClose = supportsImplicitThinkingClose(state.model);
         }
 
         // 更新 token 使用量（OpenAI 在最后一个 chunk 的 usage 中提供）
@@ -179,6 +183,7 @@ public class AnthropicStreamTranslator {
 
         // --- 工具调用增量（可能多个工具并行） ---
         if (delta.has("tool_calls") && delta.get("tool_calls").isArray()) {
+            warnIfMiniMaxToolThinkingMayBeLost(state);
             for (JsonNode toolCallDelta : delta.get("tool_calls")) {
                 emitToolDelta(outputStream, state, toolCallDelta);
             }
@@ -210,24 +215,7 @@ public class AnthropicStreamTranslator {
     private void emitTextDelta(OutputStream outputStream, StreamState state, String text) throws IOException {
         // 过滤掉 <think>...</think> 思考过程标签
         String visibleText = stripReasoningText(text, state);
-
-        // 无可见字符时：若已开启文本块则跳过，若未开启也跳过（避免空 block）
-        if (!StringUtils.hasText(visibleText) && !hasVisibleCharacters(visibleText)) {
-            return;
-        }
-        if (!state.textBlockStarted && !hasVisibleCharacters(visibleText)) {
-            return;
-        }
-
-        // 首次出现文本时，先开启 text content_block
-        if (!state.textBlockStarted) {
-            state.textBlockIndex = nextBlockIndex(state);
-            SseWriter.writeEvent(outputStream, "content_block_start", buildTextBlockStart(state.textBlockIndex));
-            state.textBlockStarted = true;
-        }
-
-        // 发送文本增量
-        SseWriter.writeEvent(outputStream, "content_block_delta", buildTextDelta(state.textBlockIndex, visibleText));
+        emitVisibleText(outputStream, state, visibleText);
     }
 
     /**
@@ -248,6 +236,8 @@ public class AnthropicStreamTranslator {
      * 并行工具支持：通过 openAiIndex → blockIndex 映射，允许多个工具块交错传输。
      */
     private void emitToolDelta(OutputStream outputStream, StreamState state, JsonNode toolCallDelta) throws IOException {
+        dropPendingImplicitReasoningBeforeTool(state);
+
         // OpenAI 的 index 用于标识并发工具，映射到 Anthropic 的 block index
         int openAiIndex = toolCallDelta.path("index").asInt(0);
         ToolCallState toolState = state.tools.get(openAiIndex);
@@ -311,6 +301,8 @@ public class AnthropicStreamTranslator {
      * - 上游未发送 [DONE] 但流已结束（某些实现省略）
      */
     private void closeAnthropicStream(OutputStream outputStream, StreamState state) throws IOException {
+        flushPendingLeadingTextAtStreamEnd(outputStream, state);
+
         // 关闭文本块（若还在进行中）
         if (state.textBlockStarted) {
             SseWriter.writeEvent(outputStream, "content_block_stop", buildContentBlockStop(state.textBlockIndex));
@@ -536,6 +528,24 @@ public class AnthropicStreamTranslator {
         return text != null && text.trim().length() > 0;
     }
 
+    private void emitVisibleText(OutputStream outputStream, StreamState state, String visibleText) throws IOException {
+        // 无可见字符时：若已开启文本块则跳过，若未开启也跳过（避免空 block）
+        if (!StringUtils.hasText(visibleText) && !hasVisibleCharacters(visibleText)) {
+            return;
+        }
+        if (!state.textBlockStarted && !hasVisibleCharacters(visibleText)) {
+            return;
+        }
+
+        if (!state.textBlockStarted) {
+            state.textBlockIndex = nextBlockIndex(state);
+            SseWriter.writeEvent(outputStream, "content_block_start", buildTextBlockStart(state.textBlockIndex));
+            state.textBlockStarted = true;
+        }
+
+        SseWriter.writeEvent(outputStream, "content_block_delta", buildTextDelta(state.textBlockIndex, visibleText));
+    }
+
     /**
      * 过滤 <think>...</think> 思考过程标签，支持跨 chunk 连续过滤。
      *
@@ -552,24 +562,49 @@ public class AnthropicStreamTranslator {
         if (!proxyProperties.isFilterReasoningText()) {
             return text;
         }
+        if (state.allowImplicitThinkingClose && !state.leadingThinkBoundaryResolved && !state.insideThinkBlock) {
+            state.pendingLeadingText.append(text);
+            return resolvePendingLeadingText(state);
+        }
 
+        return stripExplicitReasoningText(text, state);
+    }
+
+    private String resolvePendingLeadingText(StreamState state) {
+        String bufferedText = state.pendingLeadingText.toString();
+        int thinkStart = bufferedText.indexOf(THINK_OPEN_TAG);
+        int thinkEnd = bufferedText.indexOf(THINK_CLOSE_TAG);
+        if (thinkEnd >= 0 && (thinkStart < 0 || thinkEnd < thinkStart)) {
+            state.leadingThinkBoundaryResolved = true;
+            state.pendingLeadingText.setLength(0);
+            return stripExplicitReasoningText(bufferedText.substring(thinkEnd + THINK_CLOSE_TAG.length()), state);
+        }
+        if (thinkStart >= 0) {
+            state.leadingThinkBoundaryResolved = true;
+            state.pendingLeadingText.setLength(0);
+            return stripExplicitReasoningText(bufferedText, state);
+        }
+        return "";
+    }
+
+    private String stripExplicitReasoningText(String text, StreamState state) {
         StringBuilder visible = new StringBuilder();
         int index = 0;
         while (index < text.length()) {
             if (state.insideThinkBlock) {
                 // 寻找</think> 结束标签
-                int thinkEnd = text.indexOf("</think>", index);
+                int thinkEnd = text.indexOf(THINK_CLOSE_TAG, index);
                 if (thinkEnd < 0) {
                     // 整段都是思考内容，全部丢弃
                     return visible.toString();
                 }
                 state.insideThinkBlock = false;
-                index = thinkEnd + "</think>".length();
+                index = thinkEnd + THINK_CLOSE_TAG.length();
                 continue;
             }
 
             // 寻找下一个<think> 起始标签
-            int thinkStart = text.indexOf("<think>", index);
+            int thinkStart = text.indexOf(THINK_OPEN_TAG, index);
             if (thinkStart < 0) {
                 visible.append(text.substring(index));
                 break;
@@ -577,9 +612,56 @@ public class AnthropicStreamTranslator {
 
             visible.append(text, index, thinkStart);
             state.insideThinkBlock = true;
-            index = thinkStart + "<think>".length();
+            index = thinkStart + THINK_OPEN_TAG.length();
         }
         return visible.toString();
+    }
+
+    private void flushPendingLeadingTextAtStreamEnd(OutputStream outputStream, StreamState state) throws IOException {
+        if (state.pendingLeadingText.length() == 0) {
+            return;
+        }
+        if (state.leadingThinkBoundaryResolved || state.insideThinkBlock) {
+            state.pendingLeadingText.setLength(0);
+            return;
+        }
+
+        String pendingText = state.pendingLeadingText.toString();
+        state.pendingLeadingText.setLength(0);
+        state.leadingThinkBoundaryResolved = true;
+        emitVisibleText(outputStream, state, pendingText);
+    }
+
+    private void dropPendingImplicitReasoningBeforeTool(StreamState state) {
+        if (!state.allowImplicitThinkingClose || state.leadingThinkBoundaryResolved
+                || state.pendingLeadingText.length() == 0) {
+            return;
+        }
+        state.pendingLeadingText.setLength(0);
+        state.leadingThinkBoundaryResolved = true;
+    }
+
+    private boolean supportsImplicitThinkingClose(String model) {
+        String normalizedModel = model == null ? "" : model.toLowerCase();
+        return normalizedModel.contains("glm-4.5")
+                || normalizedModel.contains("glm-4.6")
+                || normalizedModel.contains("glm-4.7");
+    }
+
+    private void warnIfMiniMaxToolThinkingMayBeLost(StreamState state) {
+        if (state.reasoningFilterWarningLogged || !proxyProperties.isFilterReasoningText() || !isMiniMaxM2Model(state.model)) {
+            return;
+        }
+        state.reasoningFilterWarningLogged = true;
+        log.warn("检测到 MiniMax M2 流式工具调用，当前仍在过滤 reasoning 文本。"
+                        + "这会丢失 interleaved thinking 上下文，可能导致后续 agent/tool 回合异常。"
+                        + "如需验证，请将 FILTER_REASONING_TEXT=false。model={}",
+                state.model);
+    }
+
+    private boolean isMiniMaxM2Model(String model) {
+        String normalizedModel = model == null ? "" : model.toLowerCase();
+        return normalizedModel.contains("minimax-m2");
     }
 
     /**
@@ -594,6 +676,14 @@ public class AnthropicStreamTranslator {
         private boolean messageStopped;
         /** 是否处于 <think>...</think> 思考过程标签内部 */
         private boolean insideThinkBlock;
+        /** 是否需要兼容 GLM 模板注入的隐式 <think> 起始标签 */
+        private boolean allowImplicitThinkingClose;
+        /** 流开头的思考边界是否已经确定 */
+        private boolean leadingThinkBoundaryResolved;
+        /** 等待确定是否属于隐式思考块的前缀文本 */
+        private final StringBuilder pendingLeadingText = new StringBuilder();
+        /** 是否已经打印过 MiniMax 工具调用的 reasoning 过滤告警 */
+        private boolean reasoningFilterWarningLogged;
         /** 当前是否有开启的文本块（需在切换到工具块前关闭） */
         private boolean textBlockStarted;
         /** 当前文本块的 Anthropic block index */

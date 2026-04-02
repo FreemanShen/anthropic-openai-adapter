@@ -66,6 +66,42 @@ class AnthropicStreamTranslatorTest {
     }
 
     @Test
+    void shouldStripImplicitReasoningPrefixForGlmStream() throws Exception {
+        String sse = ""
+                + "data: {\"id\":\"chatcmpl-4\",\"model\":\"glm-4.7-flash\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n"
+                + "data: {\"id\":\"chatcmpl-4\",\"model\":\"glm-4.7-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hidden reasoning \"}}]}\n\n"
+                + "data: {\"id\":\"chatcmpl-4\",\"model\":\"glm-4.7-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"still hidden\"}}]}\n\n"
+                + "data: {\"id\":\"chatcmpl-4\",\"model\":\"glm-4.7-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"</think>Visible text\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":4}}\n\n"
+                + "data: [DONE]\n\n";
+
+        AnthropicStreamTranslator translator = createTranslator(true);
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        translator.translate(new BufferedReader(new StringReader(sse)), outputStream);
+        String output = new String(outputStream.toByteArray(), StandardCharsets.UTF_8);
+
+        Assertions.assertFalse(output.contains("hidden reasoning"));
+        Assertions.assertFalse(output.contains("still hidden"));
+        Assertions.assertTrue(output.contains("\"text\":\"Visible text\""));
+        Assertions.assertTrue(output.contains("\"stop_reason\":\"end_turn\""));
+    }
+
+    @Test
+    void shouldKeepPlainTextForNonThinkingStreamWithoutThinkTags() throws Exception {
+        String sse = ""
+                + "data: {\"id\":\"chatcmpl-5\",\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n"
+                + "data: {\"id\":\"chatcmpl-5\",\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Visible text only\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":6,\"completion_tokens\":3}}\n\n"
+                + "data: [DONE]\n\n";
+
+        AnthropicStreamTranslator translator = createTranslator(true);
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        translator.translate(new BufferedReader(new StringReader(sse)), outputStream);
+        String output = new String(outputStream.toByteArray(), StandardCharsets.UTF_8);
+
+        Assertions.assertTrue(output.contains("\"text\":\"Visible text only\""));
+        Assertions.assertTrue(output.contains("\"stop_reason\":\"end_turn\""));
+    }
+
+    @Test
     void shouldPreserveThinkBlocksWhenFilterDisabled() throws Exception {
         String sse = ""
                 + "data: {\"id\":\"chatcmpl-3\",\"model\":\"MiniMax-M2.1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"<think>\"}}]}\n\n"
