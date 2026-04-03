@@ -67,6 +67,7 @@ java -Xms256m -Xmx512m -jar target/anthropic-adapter-1.0.0.jar
 | `UPSTREAM_API_KEY` | 空 | 上游 API Key |
 | `DEFAULT_MODEL` | `MiniMax-M2.1` | 默认模型名 |
 | `FILTER_REASONING_TEXT` | `true` | 是否过滤上游普通文本中的 `<think>...</think>` |
+| `LOG_ANTHROPIC_RESPONSE_BODY` | `false` | 是否打印转换后的 Anthropic 响应日志；流式响应按预览截断记录 |
 | `LOG_PATH` | `logs` | 日志目录 |
 
 ## 5. 对外接口

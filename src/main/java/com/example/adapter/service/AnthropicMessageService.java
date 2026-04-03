@@ -1,5 +1,8 @@
 package com.example.adapter.service;
 
+import com.example.adapter.config.ProxyProperties;
+import com.example.adapter.logging.BoundedPreviewOutputStream;
+import com.example.adapter.logging.LogSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
@@ -55,13 +58,16 @@ public class AnthropicMessageService {
     private final OpenAiProxyService openAiProxyService;
     private final AnthropicOpenAiMapper mapper;
     private final AnthropicStreamTranslator streamTranslator;
+    private final ProxyProperties proxyProperties;
 
     public AnthropicMessageService(OpenAiProxyService openAiProxyService,
                                    AnthropicOpenAiMapper mapper,
-                                   AnthropicStreamTranslator streamTranslator) {
+                                   AnthropicStreamTranslator streamTranslator,
+                                   ProxyProperties proxyProperties) {
         this.openAiProxyService = openAiProxyService;
         this.mapper = mapper;
         this.streamTranslator = streamTranslator;
+        this.proxyProperties = proxyProperties;
     }
 
     /**
@@ -103,6 +109,8 @@ public class AnthropicMessageService {
             translatedBody = mapper.toAnthropicError(upstreamResponse.getBody(), upstreamResponse.getStatusCodeValue());
             log.warn("Anthropic 非流式请求收到上游错误, status={}", upstreamResponse.getStatusCodeValue());
         }
+
+        logAnthropicJsonResponse("Anthropic 非流式响应", translatedBody);
 
         // 步骤4：构造 HTTP 响应，保持上游状态码，Content-Type 为 JSON
         return ResponseEntity.status(upstreamResponse.getStatusCode())
@@ -168,8 +176,11 @@ public class AnthropicMessageService {
                 log.warn("Anthropic 流式请求失败, status={}, body={}", response.code(), errorBody);
                 servletResponse.setContentType(MediaType.APPLICATION_JSON_VALUE);
                 OutputStream outputStream = servletResponse.getOutputStream();
-                outputStream.write(mapper.toAnthropicError(errorBody, response.code()).toString().getBytes(StandardCharsets.UTF_8));
+                JsonNode translatedError = mapper.toAnthropicError(errorBody, response.code());
+                String translatedErrorBody = translatedError.toString();
+                outputStream.write(translatedErrorBody.getBytes(StandardCharsets.UTF_8));
                 outputStream.flush();
+                logAnthropicTextResponse("Anthropic 流式错误响应", translatedErrorBody);
                 return;
             }
 
@@ -179,9 +190,37 @@ public class AnthropicMessageService {
 
             // 步骤6：逐行读取上游 SSE，实时翻译为 Anthropic SSE，写入客户端
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(body.byteStream(), StandardCharsets.UTF_8))) {
-                streamTranslator.translate(reader, servletResponse.getOutputStream());
+                OutputStream outputStream = servletResponse.getOutputStream();
+                BoundedPreviewOutputStream previewOutputStream = null;
+                OutputStream targetOutputStream = outputStream;
+                if (proxyProperties.isLogAnthropicResponseBody()) {
+                    previewOutputStream = new BoundedPreviewOutputStream(outputStream, LogSanitizer.MAX_PAYLOAD_LOG_LENGTH);
+                    targetOutputStream = previewOutputStream;
+                }
+                try {
+                    streamTranslator.translate(reader, targetOutputStream);
+                } finally {
+                    if (previewOutputStream != null && previewOutputStream.hasCapturedContent()) {
+                        logAnthropicTextResponse("Anthropic 流式响应",
+                                previewOutputStream.preview(servletResponse.getCharacterEncoding()));
+                    }
+                }
             }
         }
         log.info("Anthropic 流式响应转换完成");
+    }
+
+    private void logAnthropicJsonResponse(String prefix, JsonNode body) {
+        if (body == null) {
+            return;
+        }
+        logAnthropicTextResponse(prefix, body.toString());
+    }
+
+    private void logAnthropicTextResponse(String prefix, String body) {
+        if (!proxyProperties.isLogAnthropicResponseBody()) {
+            return;
+        }
+        log.info("{} body={}", prefix, LogSanitizer.normalize(LogSanitizer.truncate(body)));
     }
 }

@@ -13,6 +13,7 @@ adapter:
     api-key: ${UPSTREAM_API_KEY:}
     default-model: ${DEFAULT_MODEL:MiniMax-M2.1}
     filter-reasoning-text: ${FILTER_REASONING_TEXT:true}
+    log-anthropic-response-body: ${LOG_ANTHROPIC_RESPONSE_BODY:false}
 
 logging:
   file:

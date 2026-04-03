@@ -47,6 +47,9 @@ public class ProxyProperties {
 
     private boolean filterReasoningText = true;
 
+    /** 是否记录转换后的 Anthropic 响应日志（JSON / SSE 预览） */
+    private boolean logAnthropicResponseBody;
+
     public String getBaseUrl() {
         return baseUrl;
     }
@@ -85,5 +88,13 @@ public class ProxyProperties {
 
     public void setFilterReasoningText(boolean filterReasoningText) {
         this.filterReasoningText = filterReasoningText;
+    }
+
+    public boolean isLogAnthropicResponseBody() {
+        return logAnthropicResponseBody;
+    }
+
+    public void setLogAnthropicResponseBody(boolean logAnthropicResponseBody) {
+        this.logAnthropicResponseBody = logAnthropicResponseBody;
     }
 }
