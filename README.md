@@ -1,4 +1,9 @@
-# Anthropic Adapter
+# Anthropic-OpenAI Adapter
+
+![Java](https://img.shields.io/badge/Java-1.8-blue)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.7.18-brightgreen)
+![OkHttp](https://img.shields.io/badge/OkHttp-4.12.0-green)
+![Maven](https://img.shields.io/badge/Maven-3.x-orange)
 
 将 Anthropic `POST /v1/messages` 请求转换为 OpenAI Compatible `POST /v1/chat/completions` 请求，并把响应再转换回 Anthropic 格式。
 
@@ -44,6 +49,7 @@ UPSTREAM_CHAT_COMPLETIONS_PATH=/chat/completions
 UPSTREAM_API_KEY=your_api_key
 DEFAULT_MODEL=MiniMax-M2.1
 FILTER_REASONING_TEXT=true
+LOG_ANTHROPIC_RESPONSE_BODY=false
 LOG_PATH=logs
 ```
 
